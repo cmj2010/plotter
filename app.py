@@ -7,7 +7,7 @@ from io import StringIO
 
 
 # =========================================================
-# 1. 核心数据引擎 (提取更多维度)
+# 1. 核心数据引擎 (模块化解析器)
 # =========================================================
 class FortiGateParser:
     def __init__(self):
@@ -17,22 +17,32 @@ class FortiGateParser:
 
         self.regex_time = re.compile(r"^System time:\s+(.+)")
 
-        # 匹配: CPU30 states: 2% user 2% system 0% nice 96% idle 0% iowait 0% irq 0% softirq
+        # --- 模块 A: CPU 及常规性能正则 ---
         self.regex_cpu = re.compile(
-            r"^CPU(\d*)\s+states:\s+(\d+)%\s+user\s+(\d+)%\s+system\s+(\d+)%\s+nice\s+(\d+)%\s+idle.*?(\d+)%\s+softirq"
-        )
+            r"^CPU(\d*)\s+states:\s+(\d+)%\s+user\s+(\d+)%\s+system\s+(\d+)%\s+nice\s+(\d+)%\s+idle.*?(\d+)%\s+softirq")
         self.regex_mem = re.compile(r"^Memory:.*?([\d\.]+)%\)")
         self.regex_bw = re.compile(r"^Average network usage:\s+(\d+)\s+/\s+(\d+)\s+kbps")
         self.regex_sess = re.compile(r"^Average sessions:\s+(\d+)\s+sessions")
         self.regex_setup = re.compile(r"^Average session setup rate:\s+(\d+)\s+sessions")
+
+        # --- 模块 B: 硬件内存 (Hardware Sysinfo Memory) 正则 ---
+        self.regex_hw_mem_trigger = re.compile(r"^MemTotal:\s+(\d+)\s+kB")
+
+        # [更新] 再次扩充正则列表，加入了你要求的 6 个 Cache 内存指标
+        # 注意对括号进行转义：\(anon\) 和 \(file\)
+        self.regex_hw_mem_metrics = re.compile(
+            r"^(Cached|AnonPages|Shmem|Buffers|MemFree|MemAvailable|Slab|SReclaimable|SUnreclaim|Active|Inactive|Active\(anon\)|Inactive\(anon\)|Active\(file\)|Inactive\(file\)):\s+(\d+)\s+kB"
+        )
 
     def parse_file(self, file_content):
         lines = file_content.splitlines()
         for line in lines:
             line = line.strip()
             if not line: continue
+
             if self._parse_system_status(line): continue
             if self._parse_perf_status(line): continue
+            if self._parse_hw_sysinfo_memory(line): continue
 
     def _parse_system_status(self, line):
         match_time = self.regex_time.search(line)
@@ -45,10 +55,9 @@ class FortiGateParser:
         return False
 
     def _parse_perf_status(self, line):
-        # 1. 动态解析所有 CPU 核心的各项指标
         match_cpu = self.regex_cpu.search(line)
         if match_cpu:
-            cpu_id = match_cpu.group(1)  # "" 代表整体 CPU
+            cpu_id = match_cpu.group(1)
             user = int(match_cpu.group(2))
             system = int(match_cpu.group(3))
             nice = int(match_cpu.group(4))
@@ -94,6 +103,29 @@ class FortiGateParser:
 
         return False
 
+    def _parse_hw_sysinfo_memory(self, line):
+        match_trigger = self.regex_hw_mem_trigger.search(line)
+        if match_trigger:
+            if 'HW_Mem_Total' in self.current_record:
+                if self.current_record not in self.records:
+                    self.records.append(self.current_record)
+                self.current_time += pd.Timedelta(minutes=1)
+                self.current_record = {'Timestamp': self.current_time}
+
+            self.current_record['HW_Mem_Total'] = int(match_trigger.group(1))
+            return True
+
+        match_metrics = self.regex_hw_mem_metrics.search(line)
+        if match_metrics:
+            key = match_metrics.group(1)
+            # 由于 key 中可能包含特殊字符如 Active(anon)，为了方便 pandas 列名管理，统一进行替换
+            safe_key = key.replace('(', '_').replace(')', '')
+            value = int(match_metrics.group(2))
+            self.current_record[f'HW_Mem_{safe_key}'] = value
+            return True
+
+        return False
+
     def get_dataframe(self):
         if self.current_record and self.current_record not in self.records:
             self.records.append(self.current_record)
@@ -118,7 +150,7 @@ def main():
         df = parser.get_dataframe()
 
         if not df.empty:
-            st.success(f"解析完成！共 {len(df)} 组数据。")
+            st.success(f"解析完成！共 {len(df)} 组数据记录。")
 
             # ---------------------------------------------------------
             # 视图 1：整体 CPU 状态
@@ -183,7 +215,6 @@ def main():
                                 hovermode="x unified"
                             )
                             st.plotly_chart(fig_group, use_container_width=True)
-
                     st.write("")
 
             # ---------------------------------------------------------
@@ -192,7 +223,6 @@ def main():
             st.markdown("---")
             st.subheader("🌐 其他关键指标")
 
-            # 采用 2x2 网格布局
             col_o1, col_o2 = st.columns(2)
             col_o3, col_o4 = st.columns(2)
 
@@ -213,10 +243,9 @@ def main():
                     st.plotly_chart(fig_sess, use_container_width=True)
 
             with col_o3:
-                # [新增] 恢复 Setup Rate 图表展示
                 if 'Setup_Rate' in df.columns:
                     fig_setup = px.line(df, x='Timestamp', y='Setup_Rate', title="Session Setup Rate (cps)")
-                    fig_setup.update_traces(line_color='orange')  # 给它一个专属的橙色
+                    fig_setup.update_traces(line_color='orange')
                     fig_setup.update_layout(height=250, margin=dict(l=0, r=0, t=30, b=0))
                     st.plotly_chart(fig_setup, use_container_width=True)
 
@@ -226,6 +255,77 @@ def main():
                     fig_mem.update_layout(yaxis_range=[0, 100], height=250, margin=dict(l=0, r=0, t=30, b=0))
                     fig_mem.update_traces(line_color='green')
                     st.plotly_chart(fig_mem, use_container_width=True)
+
+            # ---------------------------------------------------------
+            # 视图 4：底层硬件内存详情 (更新为 2x2 布局以容纳 4 张图)
+            # ---------------------------------------------------------
+            st.markdown("---")
+            st.subheader("🗄️ 底层硬件内存详情 (Hardware Memory Details)")
+
+            col_hw1, col_hw2 = st.columns(2)
+            col_hw3, col_hw4 = st.columns(2)
+
+            # [表 1: Used memory]
+            with col_hw1:
+                target_mem_cols = ['HW_Mem_Cached', 'HW_Mem_AnonPages', 'HW_Mem_Shmem', 'HW_Mem_Buffers']
+                if any(col in df.columns for col in target_mem_cols):
+                    fig_hw_mem = go.Figure()
+                    for col in target_mem_cols:
+                        if col in df.columns:
+                            fig_hw_mem.add_trace(
+                                go.Scatter(x=df['Timestamp'], y=df[col], mode='lines', name=col.replace('HW_Mem_', '')))
+                    fig_hw_mem.update_layout(title="Used memory (kB)", height=350, hovermode="x unified",
+                                             margin=dict(l=0, r=0, t=30, b=0))
+                    st.plotly_chart(fig_hw_mem, use_container_width=True)
+
+            # [表 2: Memory ratio]
+            with col_hw2:
+                target_ratio_cols = ['HW_Mem_Total', 'HW_Mem_MemFree', 'HW_Mem_MemAvailable']
+                if any(col in df.columns for col in target_ratio_cols):
+                    fig_hw_ratio = go.Figure()
+                    for col in target_ratio_cols:
+                        if col in df.columns:
+                            display_name = col.replace('HW_Mem_', '')
+                            if display_name == 'Total': display_name = 'MemTotal'
+                            fig_hw_ratio.add_trace(
+                                go.Scatter(x=df['Timestamp'], y=df[col], mode='lines', name=display_name))
+                    fig_hw_ratio.update_layout(title="Memory ratio (kB)", height=350, hovermode="x unified",
+                                               margin=dict(l=0, r=0, t=30, b=0))
+                    st.plotly_chart(fig_hw_ratio, use_container_width=True)
+
+            # [表 3: Slab]
+            with col_hw3:
+                target_slab_cols = ['HW_Mem_Slab', 'HW_Mem_SReclaimable', 'HW_Mem_SUnreclaim']
+                if any(col in df.columns for col in target_slab_cols):
+                    fig_hw_slab = go.Figure()
+                    for col in target_slab_cols:
+                        if col in df.columns:
+                            fig_hw_slab.add_trace(
+                                go.Scatter(x=df['Timestamp'], y=df[col], mode='lines', name=col.replace('HW_Mem_', '')))
+                    fig_hw_slab.update_layout(title="Slab (kB)", height=350, hovermode="x unified",
+                                              margin=dict(l=0, r=0, t=30, b=0))
+                    st.plotly_chart(fig_hw_slab, use_container_width=True)
+
+            # [表 4: Cache memory (新增)]
+            with col_hw4:
+                # 注意：正则解析时我们把括号替换成了下划线，所以这里列名长这样
+                target_cache_cols = [
+                    'HW_Mem_Active', 'HW_Mem_Inactive',
+                    'HW_Mem_Active_anon', 'HW_Mem_Inactive_anon',
+                    'HW_Mem_Active_file', 'HW_Mem_Inactive_file'
+                ]
+                if any(col in df.columns for col in target_cache_cols):
+                    fig_hw_cache = go.Figure()
+                    for col in target_cache_cols:
+                        if col in df.columns:
+                            # 还原名称以便在图例中好看点
+                            display_name = col.replace('HW_Mem_', '').replace('_anon', '(anon)').replace('_file',
+                                                                                                         '(file)')
+                            fig_hw_cache.add_trace(
+                                go.Scatter(x=df['Timestamp'], y=df[col], mode='lines', name=display_name))
+                    fig_hw_cache.update_layout(title="Cache memory (kB)", height=350, hovermode="x unified",
+                                               margin=dict(l=0, r=0, t=30, b=0))
+                    st.plotly_chart(fig_hw_cache, use_container_width=True)
 
             # 原始数据查看
             with st.expander("查看详细宽表数据"):
