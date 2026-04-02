@@ -12,12 +12,19 @@ from io import StringIO
 class FortiGateParser:
     def __init__(self):
         self.records = []
+        # 默认兜底时间
         self.current_time = pd.Timestamp("2026-04-01 08:00:00")
         self.current_record = {}
 
-        self.regex_time = re.compile(r"^System time:\s+(.+)")
+        # --- 模块 A: 时间触发器正则 ---
+        # 1. 匹配: System time: Tue Jan 11 18:30:30 2022
+        self.regex_sys_time = re.compile(r"^System time:\s+(.+)")
+        # 2. 匹配: Fri Nov  7 17:36:26 CST 2025
+        # (巧妙分组：提取前面的日期时间 + 最后的年份，避开中间的时区缩写干扰)
+        self.regex_fnsysctl_date = re.compile(
+            r"^([A-Z][a-z]{2}\s+[A-Z][a-z]{2}\s+\d+\s+\d{2}:\d{2}:\d{2})\s+[A-Z]+\s+(\d{4})")
 
-        # --- 模块 A: CPU 及常规性能正则 ---
+        # --- 模块 B: CPU 及常规性能正则 ---
         self.regex_cpu = re.compile(
             r"^CPU(\d*)\s+states:\s+(\d+)%\s+user\s+(\d+)%\s+system\s+(\d+)%\s+nice\s+(\d+)%\s+idle.*?(\d+)%\s+softirq")
         self.regex_mem = re.compile(r"^Memory:.*?([\d\.]+)%\)")
@@ -25,11 +32,8 @@ class FortiGateParser:
         self.regex_sess = re.compile(r"^Average sessions:\s+(\d+)\s+sessions")
         self.regex_setup = re.compile(r"^Average session setup rate:\s+(\d+)\s+sessions")
 
-        # --- 模块 B: 硬件内存 (Hardware Sysinfo Memory) 正则 ---
+        # --- 模块 C: 硬件内存 (Hardware Sysinfo Memory) 正则 ---
         self.regex_hw_mem_trigger = re.compile(r"^MemTotal:\s+(\d+)\s+kB")
-
-        # [更新] 再次扩充正则列表，加入了你要求的 6 个 Cache 内存指标
-        # 注意对括号进行转义：\(anon\) 和 \(file\)
         self.regex_hw_mem_metrics = re.compile(
             r"^(Cached|AnonPages|Shmem|Buffers|MemFree|MemAvailable|Slab|SReclaimable|SUnreclaim|Active|Inactive|Active\(anon\)|Inactive\(anon\)|Active\(file\)|Inactive\(file\)):\s+(\d+)\s+kB"
         )
@@ -40,18 +44,33 @@ class FortiGateParser:
             line = line.strip()
             if not line: continue
 
-            if self._parse_system_status(line): continue
+            # --- 路由逻辑 ---
+            if self._parse_time_triggers(line): continue
             if self._parse_perf_status(line): continue
             if self._parse_hw_sysinfo_memory(line): continue
 
-    def _parse_system_status(self, line):
-        match_time = self.regex_time.search(line)
-        if match_time:
+    def _parse_time_triggers(self, line):
+        """统一处理所有时间相关的命令输出"""
+        # 1. 尝试匹配 get system status 的时间
+        match_sys = self.regex_sys_time.search(line)
+        if match_sys:
             try:
-                self.current_time = pd.to_datetime(match_time.group(1))
+                self.current_time = pd.to_datetime(match_sys.group(1))
             except Exception:
                 pass
             return True
+
+        # 2. 尝试匹配 fnsysctl date 的时间
+        match_fn = self.regex_fnsysctl_date.search(line)
+        if match_fn:
+            # 重组安全的时间字符串，例如 "Fri Nov  7 17:36:26 2025" (剔除CST)
+            safe_time_str = f"{match_fn.group(1)} {match_fn.group(2)}"
+            try:
+                self.current_time = pd.to_datetime(safe_time_str)
+            except Exception:
+                pass
+            return True
+
         return False
 
     def _parse_perf_status(self, line):
@@ -68,8 +87,10 @@ class FortiGateParser:
             prefix = "CPU_Overall" if cpu_id == "" else f"CPU_{cpu_id}"
 
             if cpu_id == "":
+                # 遇到 Overall CPU，保存上一轮记录
                 if self.current_record:
                     self.records.append(self.current_record)
+                    # 默认情况时间推移1分钟，但如果上面抓到了真实时间，会被覆盖
                     self.current_time += pd.Timedelta(minutes=1)
                 self.current_record = {'Timestamp': self.current_time}
 
@@ -118,7 +139,6 @@ class FortiGateParser:
         match_metrics = self.regex_hw_mem_metrics.search(line)
         if match_metrics:
             key = match_metrics.group(1)
-            # 由于 key 中可能包含特殊字符如 Active(anon)，为了方便 pandas 列名管理，统一进行替换
             safe_key = key.replace('(', '_').replace(')', '')
             value = int(match_metrics.group(2))
             self.current_record[f'HW_Mem_{safe_key}'] = value
@@ -150,7 +170,10 @@ def main():
         df = parser.get_dataframe()
 
         if not df.empty:
-            st.success(f"解析完成！共 {len(df)} 组数据记录。")
+            # 动态显示检测到的时间范围
+            start_time = df['Timestamp'].iloc[0].strftime('%Y-%m-%d %H:%M:%S')
+            end_time = df['Timestamp'].iloc[-1].strftime('%Y-%m-%d %H:%M:%S')
+            st.success(f"解析完成！共 {len(df)} 组数据记录。数据时间范围：**{start_time}** 至 **{end_time}**")
 
             # ---------------------------------------------------------
             # 视图 1：整体 CPU 状态
@@ -257,7 +280,7 @@ def main():
                     st.plotly_chart(fig_mem, use_container_width=True)
 
             # ---------------------------------------------------------
-            # 视图 4：底层硬件内存详情 (更新为 2x2 布局以容纳 4 张图)
+            # 视图 4：底层硬件内存详情 (2x2 布局)
             # ---------------------------------------------------------
             st.markdown("---")
             st.subheader("🗄️ 底层硬件内存详情 (Hardware Memory Details)")
@@ -306,9 +329,8 @@ def main():
                                               margin=dict(l=0, r=0, t=30, b=0))
                     st.plotly_chart(fig_hw_slab, use_container_width=True)
 
-            # [表 4: Cache memory (新增)]
+            # [表 4: Cache memory]
             with col_hw4:
-                # 注意：正则解析时我们把括号替换成了下划线，所以这里列名长这样
                 target_cache_cols = [
                     'HW_Mem_Active', 'HW_Mem_Inactive',
                     'HW_Mem_Active_anon', 'HW_Mem_Inactive_anon',
@@ -318,7 +340,6 @@ def main():
                     fig_hw_cache = go.Figure()
                     for col in target_cache_cols:
                         if col in df.columns:
-                            # 还原名称以便在图例中好看点
                             display_name = col.replace('HW_Mem_', '').replace('_anon', '(anon)').replace('_file',
                                                                                                          '(file)')
                             fig_hw_cache.add_trace(
