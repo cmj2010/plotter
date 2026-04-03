@@ -20,12 +20,14 @@ class FortiGateParser:
         self.current_ips_pid = None
         self.current_ipsmon_pid = None
 
+        # --- 模块 A: 时间触发器正则 ---
         self.regex_sys_time = re.compile(r"^System time:\s+(.+)")
         self.regex_fnsysctl_date = re.compile(
-            r"^([A-Z][a-z]{2}\s+[A-Z][a-z]{2}\s+\d+\s+\d{2}:\d{2}:\d{2})\s+[A-Z]+\s+(\d{4})")
+            r"([A-Z][a-z]{2}\s+[A-Z][a-z]{2}\s+\d+\s+\d{2}:\d{2}:\d{2})\s+[A-Z]+\s+(\d{4})")
         self.regex_exec_date = re.compile(r"^current date is:\s+(\d{4}-\d{2}-\d{2})")
         self.regex_exec_time = re.compile(r"^current time is:\s+(\d{2}:\d{2}:\d{2})")
 
+        # --- 模块 B: CPU 及常规性能正则 ---
         self.regex_cpu = re.compile(
             r"^CPU(\d*)\s+states:\s+(\d+)%\s+user\s+(\d+)%\s+system\s+(\d+)%\s+nice\s+(\d+)%\s+idle.*?(\d+)%\s+softirq")
         self.regex_mem = re.compile(r"^Memory:.*?([\d\.]+)%\)")
@@ -33,14 +35,17 @@ class FortiGateParser:
         self.regex_sess = re.compile(r"^Average sessions:\s+(\d+)\s+sessions")
         self.regex_setup = re.compile(r"^Average session setup rate:\s+(\d+)\s+sessions")
 
+        # --- 模块 C: 硬件内存正则 ---
         self.regex_hw_mem_trigger = re.compile(r"^MemTotal:\s+(\d+)\s+kB")
         self.regex_hw_mem_metrics = re.compile(
             r"^(Cached|AnonPages|Shmem|Buffers|MemFree|MemAvailable|Slab|SReclaimable|SUnreclaim|Active|Inactive|Active\(anon\)|Inactive\(anon\)|Active\(file\)|Inactive\(file\)):\s+(\d+)\s+kB"
         )
 
+        # --- 模块 D: 进程内存正则 ---
         self.regex_topmem_cmd = re.compile(r"diag sys top-mem")
         self.regex_topmem_line = re.compile(r"^([\w\.\-]+)\s+\((\d+)\):\s+(\d+)kB")
 
+        # --- 模块 E: IPS Session Status 正则 ---
         self.regex_ips_cmd = re.compile(r"diagnose ips session status")
         self.regex_ips_pid = re.compile(r"^PID:\s+(\d+)")
         self.regex_ips_mem = re.compile(r"^memory (capacity|used)\s+(\d+)[A-Za-z]?")
@@ -48,15 +53,21 @@ class FortiGateParser:
         self.regex_ips_inuse = re.compile(r"^(TCP|UDP|ICMP|IP):\s*in-use\\active\\total\s+(\d+)\\")
         self.regex_ips_reass = re.compile(r"^(TCP) reassemble:\s+(\d+)")
 
+        # --- 模块 F: IPS Monitor 24 正则 ---
         self.regex_ipsmon_cmd = re.compile(r"diagnose test application ipsmonitor")
         self.regex_ipsmon_pid = re.compile(r"^pid:\s+(\d+)")
-
-        # [更新] 在正则中增加了 flowav 的三个内存指标
         self.regex_ipsmon_mem = re.compile(
             r"^(quickscan memory used|quickscan memory used peak|quickscan memory allocated peak|fullscan memory used|fullscan memory used peak|fullscan memory allocated peak|flowav memory used|flowav memory used peak|flowav memory allocated peak|memory limit):\s+(\d+)"
         )
-        self.regex_ipsmon_shm = re.compile(
-            r"^total allocated memory\s+(\d+)\s+max\s+(\d+)\s+pool_size\s+(\d+)\s+pool_max\s+(\d+)")
+
+    def _safe_parse_time(self, time_str: str):
+        try:
+            ts = pd.to_datetime(time_str, errors='coerce')
+            if pd.isna(ts): return None
+            if ts.tz is not None: return ts.tz_localize(None)
+            return ts
+        except Exception:
+            return None
 
     def parse_file(self, file_content):
         lines = file_content.splitlines()
@@ -74,19 +85,15 @@ class FortiGateParser:
     def _parse_time_triggers(self, line):
         match_sys = self.regex_sys_time.search(line)
         if match_sys:
-            try:
-                self.current_time = pd.to_datetime(match_sys.group(1))
-            except Exception:
-                pass
+            parsed_ts = self._safe_parse_time(match_sys.group(1))
+            if parsed_ts: self.current_time = parsed_ts
             return True
 
         match_fn = self.regex_fnsysctl_date.search(line)
         if match_fn:
             safe_time_str = f"{match_fn.group(1)} {match_fn.group(2)}"
-            try:
-                self.current_time = pd.to_datetime(safe_time_str)
-            except Exception:
-                pass
+            parsed_ts = self._safe_parse_time(safe_time_str)
+            if parsed_ts: self.current_time = parsed_ts
             return True
 
         match_exec_d = self.regex_exec_date.search(line)
@@ -98,11 +105,10 @@ class FortiGateParser:
         if match_exec_t:
             if self.temp_exec_date:
                 combined_time_str = f"{self.temp_exec_date} {match_exec_t.group(1)}"
-                try:
-                    self.current_time = pd.to_datetime(combined_time_str)
+                parsed_ts = self._safe_parse_time(combined_time_str)
+                if parsed_ts:
+                    self.current_time = parsed_ts
                     self.temp_exec_date = None
-                except Exception:
-                    pass
             return True
 
         return False
@@ -263,15 +269,6 @@ class FortiGateParser:
                 safe_key = raw_key.replace(' ', '_')
                 val = int(match_mem.group(2))
                 self.current_record[f"IPSMON_{self.current_ipsmon_pid}_{safe_key}"] = val
-                return True
-
-            match_shm = self.regex_ipsmon_shm.search(line)
-            if match_shm:
-                pid = self.current_ipsmon_pid
-                self.current_record[f"IPSMON_{pid}_total_allocated_memory"] = int(match_shm.group(1))
-                self.current_record[f"IPSMON_{pid}_max"] = int(match_shm.group(2))
-                self.current_record[f"IPSMON_{pid}_pool_size"] = int(match_shm.group(3))
-                self.current_record[f"IPSMON_{pid}_pool_max"] = int(match_shm.group(4))
                 return True
 
         return False
@@ -556,9 +553,8 @@ def main():
                             with cols[1]:
                                 st.plotly_chart(ips_figs[i + 1], use_container_width=True)
 
-            # --- 视图 7：IPS Monitor 内存分配 [本次更新重点: 增加了 flowav 指标] ---
-            ipsmon_cols = [col for col in df.columns if col.startswith('IPSMON_') and not any(
-                x in col for x in ['total_allocated_memory', '_max', '_pool'])]
+            # --- 视图 7：IPS Monitor 内存分配 ---
+            ipsmon_cols = [col for col in df.columns if col.startswith('IPSMON_')]
             if ipsmon_cols:
                 st.markdown("---")
                 st.subheader("🔬 IPS Scan 内存分配详情 (ipsmonitor 24)")
@@ -571,7 +567,6 @@ def main():
                 for idx, pid in enumerate(ipsmon_pids):
                     with cols_ipsmon[idx % 2]:
                         fig_ipsmon = go.Figure()
-                        # 在 target_metrics 中加入了 flowav 相关指标
                         target_metrics = [
                             'quickscan_memory_used', 'quickscan_memory_used_peak', 'quickscan_memory_allocated_peak',
                             'fullscan_memory_used', 'fullscan_memory_used_peak', 'fullscan_memory_allocated_peak',
@@ -581,7 +576,7 @@ def main():
                         line_styles = {
                             'memory_limit': dict(color='red', dash='dash', width=2),
                             'quickscan_memory_allocated_peak': dict(dash='dot'),
-                            'flowav_memory_allocated_peak': dict(dash='dot')  # 为 flowav 的分配峰值也设为虚线
+                            'flowav_memory_allocated_peak': dict(dash='dot')
                         }
                         has_data = False
                         for metric in target_metrics:
@@ -598,47 +593,6 @@ def main():
                                                      yaxis_title="Size (Bytes)", height=400, hovermode="x unified",
                                                      margin=dict(l=0, r=0, t=30, b=0))
                             st.plotly_chart(fig_ipsmon, use_container_width=True)
-
-            # --- 视图 8：IPS Share memory usage ---
-            shm_cols = [col for col in df.columns if 'total_allocated_memory' in col or '_pool_size' in col]
-            if shm_cols:
-                st.markdown("---")
-                st.subheader("🔗 IPS 共享内存池 (IPS Share memory usage)")
-
-                shm_pids = set()
-                for col in shm_cols:
-                    match = re.search(r"^IPSMON_(\d+)_", col)
-                    if match:
-                        shm_pids.add(match.group(1))
-                shm_pids = sorted(list(shm_pids))
-
-                cols_shm = st.columns(2)
-                for idx, pid in enumerate(shm_pids):
-                    with cols_shm[idx % 2]:
-                        fig_shm = go.Figure()
-                        target_shm = ['total_allocated_memory', 'max', 'pool_size', 'pool_max']
-                        line_styles_shm = {
-                            'max': dict(color='red', dash='dash', width=2),
-                            'pool_max': dict(color='orange', dash='dash', width=2),
-                            'total_allocated_memory': dict(color='blue'),
-                            'pool_size': dict(color='green')
-                        }
-
-                        has_data = False
-                        for metric in target_shm:
-                            col_name = f"IPSMON_{pid}_{metric}"
-                            if col_name in df.columns:
-                                has_data = True
-                                display_name = metric.replace('_', ' ')
-                                line_style = line_styles_shm.get(metric, dict(width=1))
-                                fig_shm.add_trace(
-                                    go.Scatter(x=df['Timestamp'], y=df[col_name], mode='lines', name=display_name,
-                                               line=line_style))
-
-                        if has_data:
-                            fig_shm.update_layout(title=f"IPS Share Memory (PID: {pid})", yaxis_title="Size",
-                                                  height=400, hovermode="x unified", margin=dict(l=0, r=0, t=30, b=0))
-                            st.plotly_chart(fig_shm, use_container_width=True)
 
             # 原始数据查看
             with st.expander("查看详细宽表数据"):
