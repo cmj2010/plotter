@@ -285,8 +285,19 @@ class FortiGateParser:
 def main():
     st.set_page_config(page_title="Plotter", layout="wide")
     st.title("📈 FortiGate日志分析引擎")
-    st.balloons()
-    st.link_button("收集信息指南", "https://community.fortinet.com/t5/FortiGate/Technical-Tip-TAC-debug-script-with-TeraTerm/ta-p/287059")
+    st.markdown('''本工具用于观察系统各项指标的增长趋势，需要通过命令定期收集，目前支持以下命令''')
+    code = '''
+    fnsysctl date
+    get system status
+    get sys performance status
+    diag hardware sysinfo memory
+    diag sys top-mem 50
+    diag ips session status
+    diag test application ipsmonitor 24
+    '''
+    st.code(code, language="none")
+
+    #st.link_button("收集信息指南", "https://community.fortinet.com/t5/FortiGate/Technical-Tip-TAC-debug-script-with-TeraTerm/ta-p/287059")
 
     uploaded_file = st.file_uploader("上传诊断日志", type=['txt', 'log'])
 
