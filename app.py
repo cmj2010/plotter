@@ -295,7 +295,7 @@ def main():
     diag ips session status
     diag test application ipsmonitor 24
     '''
-    st.code(code, language="none")
+    st.code(code, language="text")
 
     uploaded_file = st.file_uploader("上传诊断日志", type=['txt', 'log'])
 
