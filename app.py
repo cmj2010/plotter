@@ -283,8 +283,10 @@ class FortiGateParser:
 # 2. 前端展示层 (Streamlit UI)
 # =========================================================
 def main():
-    st.set_page_config(page_title="Fortigate 性能报告", layout="wide")
-    st.title("📈 模块化日志分析引擎")
+    st.set_page_config(page_title="Plotter", layout="wide")
+    st.title("📈 FortiGate日志分析引擎")
+    st.balloons()
+    st.link_button("收集信息指南", "https://community.fortinet.com/t5/FortiGate/Technical-Tip-TAC-debug-script-with-TeraTerm/ta-p/287059")
 
     uploaded_file = st.file_uploader("上传诊断日志", type=['txt', 'log'])
 
@@ -544,7 +546,7 @@ def main():
 
                 if ips_figs:
                     st.markdown("---")
-                    st.subheader("🛡️ IPS 引擎会话状态 (Session Status)")
+                    st.subheader("🔬 IPSengine Session Status")
                     for i in range(0, len(ips_figs), 2):
                         cols = st.columns(2)
                         with cols[0]:
@@ -557,7 +559,7 @@ def main():
             ipsmon_cols = [col for col in df.columns if col.startswith('IPSMON_')]
             if ipsmon_cols:
                 st.markdown("---")
-                st.subheader("🔬 IPS Scan 内存分配详情 (ipsmonitor 24)")
+                st.subheader("🛡️ Flow AV statistics")
                 ipsmon_pids = set()
                 for col in ipsmon_cols:
                     match = re.search(r"^IPSMON_(\d+)_", col)
