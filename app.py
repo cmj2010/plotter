@@ -297,8 +297,6 @@ def main():
     '''
     st.code(code, language="none")
 
-    #st.link_button("收集信息指南", "https://community.fortinet.com/t5/FortiGate/Technical-Tip-TAC-debug-script-with-TeraTerm/ta-p/287059")
-
     uploaded_file = st.file_uploader("上传诊断日志", type=['txt', 'log'])
 
     if uploaded_file is not None:
@@ -411,8 +409,8 @@ def main():
                 for col in target_mem_cols:
                     if col in df.columns:
                         fig_hw_mem.add_trace(
-                            go.Scatter(x=df['Timestamp'], y=df[col], mode='lines', name=col.replace('HW_Mem_', '')))
-                fig_hw_mem.update_layout(title="Used memory (kB)", height=350, hovermode="x unified",
+                            go.Scatter(x=df['Timestamp'], y=df[col] / 1024, mode='lines', name=col.replace('HW_Mem_', '')))
+                fig_hw_mem.update_layout(title="Used memory (MB)", yaxis_title="MB", height=350, hovermode="x unified",
                                          margin=dict(l=0, r=0, t=30, b=0))
                 hw_figs.append(fig_hw_mem)
 
@@ -424,8 +422,8 @@ def main():
                         display_name = col.replace('HW_Mem_', '')
                         if display_name == 'Total': display_name = 'MemTotal'
                         fig_hw_ratio.add_trace(
-                            go.Scatter(x=df['Timestamp'], y=df[col], mode='lines', name=display_name))
-                fig_hw_ratio.update_layout(title="Memory ratio (kB)", height=350, hovermode="x unified",
+                            go.Scatter(x=df['Timestamp'], y=df[col] / 1024, mode='lines', name=display_name))
+                fig_hw_ratio.update_layout(title="Memory ratio (MB)", yaxis_title="MB", height=350, hovermode="x unified",
                                            margin=dict(l=0, r=0, t=30, b=0))
                 hw_figs.append(fig_hw_ratio)
 
@@ -435,8 +433,8 @@ def main():
                 for col in target_slab_cols:
                     if col in df.columns:
                         fig_hw_slab.add_trace(
-                            go.Scatter(x=df['Timestamp'], y=df[col], mode='lines', name=col.replace('HW_Mem_', '')))
-                fig_hw_slab.update_layout(title="Slab (kB)", height=350, hovermode="x unified",
+                            go.Scatter(x=df['Timestamp'], y=df[col] / 1024, mode='lines', name=col.replace('HW_Mem_', '')))
+                fig_hw_slab.update_layout(title="Slab (MB)", yaxis_title="MB", height=350, hovermode="x unified",
                                           margin=dict(l=0, r=0, t=30, b=0))
                 hw_figs.append(fig_hw_slab)
 
@@ -451,8 +449,8 @@ def main():
                     if col in df.columns:
                         display_name = col.replace('HW_Mem_', '').replace('_anon', '(anon)').replace('_file', '(file)')
                         fig_hw_cache.add_trace(
-                            go.Scatter(x=df['Timestamp'], y=df[col], mode='lines', name=display_name))
-                fig_hw_cache.update_layout(title="Cache memory (kB)", height=350, hovermode="x unified",
+                            go.Scatter(x=df['Timestamp'], y=df[col] / 1024, mode='lines', name=display_name))
+                fig_hw_cache.update_layout(title="Cache memory (MB)", yaxis_title="MB", height=350, hovermode="x unified",
                                            margin=dict(l=0, r=0, t=30, b=0))
                 hw_figs.append(fig_hw_cache)
 
@@ -495,8 +493,8 @@ def main():
                         for col in proc_cols:
                             pid_match = re.search(r"\((\d+)\)", col)
                             pid_str = f"PID: {pid_match.group(1)}" if pid_match else col
-                            fig_topmem.add_trace(go.Scatter(x=df['Timestamp'], y=df[col], mode='lines', name=pid_str))
-                        fig_topmem.update_layout(title=f"Process: {proc_name}", yaxis_title="Memory (kB)", height=350,
+                            fig_topmem.add_trace(go.Scatter(x=df['Timestamp'], y=df[col] / 1024, mode='lines', name=pid_str))
+                        fig_topmem.update_layout(title=f"Process: {proc_name}", yaxis_title="Memory (MB)", height=350,
                                                  hovermode="x unified", margin=dict(l=0, r=0, t=30, b=0))
                         st.plotly_chart(fig_topmem, use_container_width=True)
 
