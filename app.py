@@ -284,7 +284,7 @@ class FortiGateParser:
 # =========================================================
 def main():
     st.set_page_config(page_title="Plotter", layout="wide")
-    st.title("📈 FortiGate日志分析引擎")
+    st.title("📈 Debug 信息分析引擎")
     st.markdown('''本工具用于观察系统各项指标的增长趋势，需要通过命令定期收集，目前支持以下命令''')
     code = '''
     fnsysctl date
