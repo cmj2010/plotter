@@ -38,7 +38,7 @@ class FortiGateParser:
         # --- 模块 C: 硬件内存正则 ---
         self.regex_hw_mem_trigger = re.compile(r"^MemTotal:\s+(\d+)\s+kB")
         self.regex_hw_mem_metrics = re.compile(
-            r"^(Cached|AnonPages|Shmem|Buffers|MemFree|MemAvailable|Slab|SReclaimable|SUnreclaim|Active|Inactive|Active\(anon\)|Inactive\(anon\)|Active\(file\)|Inactive\(file\)):\s+(\d+)\s+kB"
+            r"^([a-zA-Z0-9_\(\)]+):\s+(\d+)(?:\s+kB)?"
         )
 
         # --- 模块 D: 进程内存正则 ---
@@ -486,6 +486,31 @@ def main():
                     if i + 1 < len(hw_figs):
                         with cols[1]:
                             st.plotly_chart(hw_figs[i + 1], use_container_width=True)
+
+            hw_all_cols = [col for col in df.columns if col.startswith('HW_Mem_')]
+            if hw_all_cols:
+                st.markdown("##### 🛠️ 自定义参数视图 (Custom Metrics)")
+                hw_display_options = {col: col.replace('HW_Mem_', '') for col in hw_all_cols}
+                selected_hw_cols = st.multiselect(
+                    "请选择要绘制的参数（支持多选）:",
+                    options=hw_all_cols,
+                    default=['HW_Mem_Buffers'] if 'HW_Mem_Buffers' in hw_all_cols else [],
+                    format_func=lambda x: hw_display_options[x]
+                )
+                if selected_hw_cols:
+                    fig_hw_custom = go.Figure()
+                    for col in selected_hw_cols:
+                        fig_hw_custom.add_trace(
+                            go.Scatter(x=df['Timestamp'], y=df[col] / 1024, mode='lines', name=hw_display_options[col])
+                        )
+                    fig_hw_custom.update_layout(
+                        title="自定义指标走势 (MB)", 
+                        yaxis_title="Size (MB) / Count", 
+                        height=400, 
+                        hovermode="x unified", 
+                        margin=dict(l=0, r=0, t=30, b=0)
+                    )
+                    st.plotly_chart(fig_hw_custom, use_container_width=True)
 
             # --- 视图 5：进程级内存消耗排行 ---
             topmem_cols = [col for col in df.columns if col.startswith('TopMem_')]
