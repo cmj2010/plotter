@@ -427,7 +427,7 @@ def main():
                                            margin=dict(l=0, r=0, t=30, b=0))
                 hw_figs.append(fig_hw_ratio)
 
-            target_slab_cols = ['HW_Mem_Slab', 'HW_Mem_SReclaimable', 'HW_Mem_SUnreclaim']
+            target_slab_cols = ['HW_Mem_Slab']
             if any(col in df.columns for col in target_slab_cols):
                 fig_hw_slab = go.Figure()
                 for col in target_slab_cols:
@@ -437,6 +437,28 @@ def main():
                 fig_hw_slab.update_layout(title="Slab (MB)", yaxis_title="MB", height=350, hovermode="x unified",
                                           margin=dict(l=0, r=0, t=30, b=0))
                 hw_figs.append(fig_hw_slab)
+
+            target_srec_cols = ['HW_Mem_SReclaimable']
+            if any(col in df.columns for col in target_srec_cols):
+                fig_hw_srec = go.Figure()
+                for col in target_srec_cols:
+                    if col in df.columns:
+                        fig_hw_srec.add_trace(
+                            go.Scatter(x=df['Timestamp'], y=df[col] / 1024, mode='lines', name=col.replace('HW_Mem_', '')))
+                fig_hw_srec.update_layout(title="SReclaimable(可回收) (MB)", yaxis_title="MB", height=350, hovermode="x unified",
+                                          margin=dict(l=0, r=0, t=30, b=0))
+                hw_figs.append(fig_hw_srec)
+
+            target_sunrec_cols = ['HW_Mem_SUnreclaim']
+            if any(col in df.columns for col in target_sunrec_cols):
+                fig_hw_sunrec = go.Figure()
+                for col in target_sunrec_cols:
+                    if col in df.columns:
+                        fig_hw_sunrec.add_trace(
+                            go.Scatter(x=df['Timestamp'], y=df[col] / 1024, mode='lines', name=col.replace('HW_Mem_', '')))
+                fig_hw_sunrec.update_layout(title="SUnreclaim(不可回收) (MB)", yaxis_title="MB", height=350, hovermode="x unified",
+                                            margin=dict(l=0, r=0, t=30, b=0))
+                hw_figs.append(fig_hw_sunrec)
 
             target_cache_cols = [
                 'HW_Mem_Active', 'HW_Mem_Inactive',
