@@ -366,7 +366,7 @@ def main():
                                        line=dict(color=colors.get(metric))))
                 fig_overall_cpu.update_layout(yaxis_title="Usage (%)", yaxis_range=[0, 100], height=350,
                                               hovermode="x unified")
-                st.plotly_chart(fig_overall_cpu, use_container_width=True)
+                st.plotly_chart(fig_overall_cpu, use_container_width=True, key="fig_overall_cpu")
 
             # --- 视图 2：子 CPU 分组图表 ---
             cpu_cols = [col for col in df.columns if re.match(r"^CPU_\d+_total$", col)]
@@ -394,7 +394,7 @@ def main():
                             fig_group.update_layout(title=f"{group_title} ({metric.capitalize()})",
                                                     yaxis_range=[0, 100], margin=dict(l=0, r=0, t=30, b=0), height=250,
                                                     hovermode="x unified")
-                            st.plotly_chart(fig_group, use_container_width=True)
+                            st.plotly_chart(fig_group, use_container_width=True, key=f"cpu_group_{group_title}_{metric}")
                     st.write("")
 
             # --- 视图 3：其他全局指标 (动态收纳) ---
@@ -429,10 +429,10 @@ def main():
                 for i in range(0, len(global_figs), 2):
                     cols = st.columns(2)
                     with cols[0]:
-                        st.plotly_chart(global_figs[i], use_container_width=True)
+                        st.plotly_chart(global_figs[i], use_container_width=True, key=f"global_fig_{i}")
                     if i + 1 < len(global_figs):
                         with cols[1]:
-                            st.plotly_chart(global_figs[i + 1], use_container_width=True)
+                            st.plotly_chart(global_figs[i + 1], use_container_width=True, key=f"global_fig_{i+1}")
 
             # --- 视图 4：底层硬件内存详情 (动态收纳) ---
             hw_figs = []
@@ -516,10 +516,10 @@ def main():
                 for i in range(0, len(hw_figs), 2):
                     cols = st.columns(2)
                     with cols[0]:
-                        st.plotly_chart(hw_figs[i], use_container_width=True)
+                        st.plotly_chart(hw_figs[i], use_container_width=True, key=f"hw_fig_{i}")
                     if i + 1 < len(hw_figs):
                         with cols[1]:
-                            st.plotly_chart(hw_figs[i + 1], use_container_width=True)
+                            st.plotly_chart(hw_figs[i + 1], use_container_width=True, key=f"hw_fig_{i+1}")
 
             hw_all_cols = [col for col in df.columns if col.startswith('HW_Mem_')]
             if hw_all_cols:
@@ -544,7 +544,7 @@ def main():
                         hovermode="x unified", 
                         margin=dict(l=0, r=0, t=30, b=0)
                     )
-                    st.plotly_chart(fig_hw_custom, use_container_width=True)
+                    st.plotly_chart(fig_hw_custom, use_container_width=True, key="fig_hw_custom")
 
             # --- 视图 5：进程级内存消耗排行 ---
             topmem_cols = [col for col in df.columns if col.startswith('TopMem_')]
@@ -577,7 +577,7 @@ def main():
                             fig_topmem.add_trace(go.Scatter(x=df['Timestamp'], y=df[col] / 1024, mode='lines', name=pid_str))
                         fig_topmem.update_layout(title=f"Process: {proc_name}", yaxis_title="Memory (MB)", height=350,
                                                  hovermode="x unified", margin=dict(l=0, r=0, t=30, b=0))
-                        st.plotly_chart(fig_topmem, use_container_width=True)
+                        st.plotly_chart(fig_topmem, use_container_width=True, key=f"topmem_fig_{idx}")
 
             # --- 视图 6：IPS Session Status (动态收纳) ---
             ips_cols = [col for col in df.columns if col.startswith('IPS_')]
@@ -640,10 +640,10 @@ def main():
                     for i in range(0, len(ips_figs), 2):
                         cols = st.columns(2)
                         with cols[0]:
-                            st.plotly_chart(ips_figs[i], use_container_width=True)
+                            st.plotly_chart(ips_figs[i], use_container_width=True, key=f"ips_fig_{i}")
                         if i + 1 < len(ips_figs):
                             with cols[1]:
-                                st.plotly_chart(ips_figs[i + 1], use_container_width=True)
+                                st.plotly_chart(ips_figs[i + 1], use_container_width=True, key=f"ips_fig_{i+1}")
 
             # --- 视图 7：IPS Monitor 内存分配 ---
             ipsmon_cols = [col for col in df.columns if col.startswith('IPSMON_')]
@@ -684,7 +684,7 @@ def main():
                             fig_ipsmon.update_layout(title=f"IPS Monitor Memory (PID: {pid})",
                                                      yaxis_title="Size (Bytes)", height=400, hovermode="x unified",
                                                      margin=dict(l=0, r=0, t=30, b=0))
-                            st.plotly_chart(fig_ipsmon, use_container_width=True)
+                            st.plotly_chart(fig_ipsmon, use_container_width=True, key=f"ipsmon_fig_{pid}")
 
             # --- 视图 8：SNMP 统计信息 (按协议分类) ---
             snmp_cols = [col for col in df.columns if col.startswith('SNMP_')]
@@ -731,7 +731,7 @@ def main():
                                 hovermode="x unified", 
                                 margin=dict(l=0, r=0, t=10, b=0)
                             )
-                            st.plotly_chart(fig_proto, use_container_width=True)
+                            st.plotly_chart(fig_proto, use_container_width=True, key=f"snmp_chart_{proto}")
                         else:
                             st.info(f"当前未选择 {proto} 的参数。")
 
