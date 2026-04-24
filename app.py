@@ -38,7 +38,7 @@ class FortiGateParser:
         # --- 模块 C: 硬件内存正则 ---
         self.regex_hw_mem_trigger = re.compile(r"^MemTotal:\s+(\d+)\s+kB")
         self.regex_hw_mem_metrics = re.compile(
-            r"^([a-zA-Z0-9_\(\)]+):\s+(\d+)(?:\s+kB)?"
+            r"^([a-zA-Z0-9_\(\)]+):\s+(\d+)(?:\s+kB)?\s*$"
         )
 
         # --- 模块 D: 进程内存正则 ---
@@ -59,6 +59,11 @@ class FortiGateParser:
         self.regex_ipsmon_mem = re.compile(
             r"^(quickscan memory used|quickscan memory used peak|quickscan memory allocated peak|fullscan memory used|fullscan memory used peak|fullscan memory allocated peak|flowav memory used|flowav memory used peak|flowav memory allocated peak|memory limit):\s+(\d+)"
         )
+
+        # --- 模块 G: SNMP 正则 ---
+        self.regex_snmp_trigger = re.compile(r"^\[/proc/net/snmp\]")
+        self.regex_snmp_line = re.compile(r"^(Ip|Icmp|IcmpMsg|Tcp|Udp|UdpLite):\s+(.+)$")
+        self.temp_snmp_headers = {}
 
     def _safe_parse_time(self, time_str: str):
         try:
@@ -81,6 +86,7 @@ class FortiGateParser:
             if self._parse_topmem(line): continue
             if self._parse_ips_session(line): continue
             if self._parse_ipsmonitor(line): continue
+            if self._parse_snmp(line): continue
 
     def _parse_time_triggers(self, line):
         match_sys = self.regex_sys_time.search(line)
@@ -246,6 +252,33 @@ class FortiGateParser:
 
         return False
 
+    def _parse_snmp(self, line):
+        match_trigger = self.regex_snmp_trigger.search(line)
+        if match_trigger:
+            if any(k.startswith('SNMP_') for k in self.current_record.keys()):
+                if self.current_record not in self.records:
+                    self.records.append(self.current_record)
+                self.current_time += pd.Timedelta(minutes=1)
+                self.current_record = {'Timestamp': self.current_time}
+            self.temp_snmp_headers = {}
+            return True
+
+        match_line = self.regex_snmp_line.search(line)
+        if match_line:
+            protocol = match_line.group(1)
+            content = match_line.group(2).strip()
+
+            if re.match(r"^[0-9\-\s]+$", content):
+                values = content.split()
+                headers = self.temp_snmp_headers.get(protocol, [])
+                for h, v in zip(headers, values):
+                    self.current_record[f"SNMP_{protocol}_{h}"] = int(v)
+            else:
+                self.temp_snmp_headers[protocol] = content.split()
+            return True
+
+        return False
+
     def _parse_ipsmonitor(self, line):
         match_cmd = self.regex_ipsmon_cmd.search(line)
         if match_cmd:
@@ -294,6 +327,7 @@ def main():
     diag sys top-mem 50
     diag ips session status
     diag test application ipsmonitor 24
+    fnsysctl cat /proc/net/snmp
     '''
     st.code(code, language="text")
 
@@ -651,6 +685,55 @@ def main():
                                                      yaxis_title="Size (Bytes)", height=400, hovermode="x unified",
                                                      margin=dict(l=0, r=0, t=30, b=0))
                             st.plotly_chart(fig_ipsmon, use_container_width=True)
+
+            # --- 视图 8：SNMP 统计信息 (按协议分类) ---
+            snmp_cols = [col for col in df.columns if col.startswith('SNMP_')]
+            if snmp_cols:
+                st.markdown("---")
+                st.subheader("📡 SNMP 网络统计 (按协议分类)")
+                
+                protocols = ["Ip", "Icmp", "IcmpMsg", "Tcp", "Udp", "UdpLite"]
+                default_selections = {
+                    "Ip": ['SNMP_Ip_InReceives', 'SNMP_Ip_ForwDatagrams', 'SNMP_Ip_InDelivers', 'SNMP_Ip_OutRequests'],
+                    "Icmp": ['SNMP_Icmp_InMsgs', 'SNMP_Icmp_OutMsgs'],
+                    "IcmpMsg": [],
+                    "Tcp": ['SNMP_Tcp_InSegs', 'SNMP_Tcp_OutSegs', 'SNMP_Tcp_RetransSegs'],
+                    "Udp": ['SNMP_Udp_InDatagrams', 'SNMP_Udp_OutDatagrams', 'SNMP_Udp_InErrors'],
+                    "UdpLite": []
+                }
+
+                st.markdown("您可以在下方针对每种协议选择需要查看的具体参数，支持多选与动态对比。")
+                
+                for proto in protocols:
+                    proto_cols = [col for col in snmp_cols if col.startswith(f'SNMP_{proto}_')]
+                    if proto_cols:
+                        st.markdown(f"#### ❖ {proto} Protocol")
+                        proto_display_options = {col: col.replace(f'SNMP_{proto}_', '') for col in proto_cols}
+                        safe_defaults = [col for col in default_selections.get(proto, []) if col in proto_cols]
+                        
+                        selected_proto_cols = st.multiselect(
+                            f"请选择 {proto} 的参数（可选条目如 InReceives, Forwarding 等）:",
+                            options=proto_cols,
+                            default=safe_defaults,
+                            format_func=lambda x: proto_display_options[x],
+                            key=f"snmp_ms_{proto}"
+                        )
+        
+                        if selected_proto_cols:
+                            fig_proto = go.Figure()
+                            for col in selected_proto_cols:
+                                fig_proto.add_trace(
+                                    go.Scatter(x=df['Timestamp'], y=df[col], mode='lines', name=proto_display_options[col])
+                                )
+                            fig_proto.update_layout(
+                                yaxis_title="Count", 
+                                height=400, 
+                                hovermode="x unified", 
+                                margin=dict(l=0, r=0, t=10, b=0)
+                            )
+                            st.plotly_chart(fig_proto, use_container_width=True)
+                        else:
+                            st.info(f"当前未选择 {proto} 的参数。")
 
             # 原始数据查看
             with st.expander("查看详细宽表数据"):
